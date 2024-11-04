@@ -59,7 +59,9 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 
-RUN dnf install -y python3.11 unzip openssl-devel
+# installing both 3.9 and 3.11, but setting 3.11 as default (cannot clear cargo attempting to link to 3.9).
+RUN dnf install -y python3.11-devel python3.9-devel unzip openssl-devel; \
+    alternatives --install /usr/bin/python python /usr/bin/python3.11 1
 
 RUN PROTOC_ZIP=protoc-21.12-linux-x86_64.zip && \
     curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v21.12/$PROTOC_ZIP && \
@@ -222,7 +224,7 @@ COPY server/Makefile-flashinfer Makefile
 RUN make install-flashinfer
 
 
-## Base Layer ##################################################################
+# Base Layer ##################################################################
 FROM registry.access.redhat.com/ubi9/ubi:${BASE_UBI_IMAGE_TAG} AS base
 WORKDIR /app
 
