@@ -11,13 +11,13 @@ docker/build:
 	docker build --tag $(IMAGE_NAME):$(IMAGE_TAG) --file ../../Dockerfile .
 
 docker/run:
-	@model=teknium/OpenHermes-2.5-Mistral-7B; \
+	model=teknium/OpenHermes-2.5-Mistral-7B; \
     volume=$(PWD)/data; \
     docker run --gpus all --shm-size 1g -p 8080:80 -v $volume:/data \
         $(IMAGE_NAME):$(IMAGE_TAG) \
         --model-id $model
 
 clean:
-	@-rm -r build/
+	@-rm -r build/ data/
 
 .PHONY: docker/build docker/run

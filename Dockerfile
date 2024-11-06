@@ -11,7 +11,8 @@ ARG BASE_UBI_IMAGE_TAG=9.4-1214
 # Rust builder
 FROM registry.access.redhat.com/ubi9/ubi:${BASE_UBI_IMAGE_TAG} AS chef
 
-RUN dnf install -y wget gcc g++
+RUN dnf install -y wget gcc g++; \
+    dnf clean all
 
 # adapted from: https://github.com/rust-lang/docker-rust/blob/1700955/stable/bullseye/Dockerfile
 ENV RUSTUP_HOME=/usr/local/rustup \
@@ -61,7 +62,8 @@ FROM chef AS builder
 
 # installing both 3.9 and 3.11, but setting 3.11 as default (cannot clear cargo attempting to link to 3.9).
 RUN dnf install -y python3.11-devel python3.9-devel unzip openssl-devel; \
-    alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+    alternatives --install /usr/bin/python python /usr/bin/python3.11 1; \
+    dnf clean all
 
 RUN PROTOC_ZIP=protoc-21.12-linux-x86_64.zip && \
     curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v21.12/$PROTOC_ZIP && \
@@ -105,7 +107,8 @@ ENV PATH /opt/conda/bin:$PATH
 
 RUN dnf install -y \
         ca-certificates \
-        git
+        git; \
+    dnf clean all
 
 # Install conda
 # translating Docker's TARGETPLATFORM into mamba arches
@@ -133,8 +136,8 @@ FROM pytorch-install AS kernel-builder
 ARG MAX_JOBS=8
 ENV TORCH_CUDA_ARCH_LIST="8.0;8.6;9.0+PTX"
 
-RUN dnf install -y \
-        ninja-build cmake
+RUN dnf install -y ninja-build cmake; \
+    dnf clean all
 
 # Build Flash Attention CUDA kernels
 FROM kernel-builder AS flash-att-builder
@@ -242,6 +245,8 @@ RUN dnf remove -y --disableplugin=subscription-manager \
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
+FROM base AS cuda-base
+
 # Ref: https://docs.nvidia.com/cuda/archive/12.4.1/cuda-toolkit-release-notes/
 ENV CUDA_VERSION=12.4.1 \
     NV_CUDA_LIB_VERSION=12.4.1 \
@@ -263,6 +268,32 @@ ENV CUDA_HOME="/usr/local/cuda" \
     PATH="/usr/local/nvidia/bin:${CUDA_HOME}/bin:${PATH}" \
     LD_LIBRARY_PATH="/usr/local/nvidia/lib:/usr/local/nvidia/lib64:$CUDA_HOME/lib64:$CUDA_HOME/extras/CUPTI/lib64:${LD_LIBRARY_PATH}"
 
+#FROM cuda-base as cuda-devel
+#
+## Ref: https://developer.nvidia.com/nccl/nccl-legacy-downloads
+#ENV NV_CUDA_CUDART_DEV_VERSION=12.1.55-1 \
+#    NV_NVML_DEV_VERSION=12.1.55-1 \
+#    NV_LIBCUBLAS_DEV_VERSION=12.1.0.26-1 \
+#    NV_LIBNPP_DEV_VERSION=12.0.2.50-1 \
+#    NV_LIBNCCL_DEV_PACKAGE_VERSION=2.18.3-1+cuda12.1
+#
+#RUN dnf config-manager \
+#       --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo \
+#    && dnf install -y \
+#        cuda-command-line-tools-12-1-${NV_CUDA_LIB_VERSION} \
+#        cuda-libraries-devel-12-1-${NV_CUDA_LIB_VERSION} \
+#        cuda-minimal-build-12-1-${NV_CUDA_LIB_VERSION} \
+#        cuda-cudart-devel-12-1-${NV_CUDA_CUDART_DEV_VERSION} \
+#        cuda-nvml-devel-12-1-${NV_NVML_DEV_VERSION} \
+#        libcublas-devel-12-1-${NV_LIBCUBLAS_DEV_VERSION} \
+#        libnpp-devel-12-1-${NV_LIBNPP_DEV_VERSION} \
+#        libnccl-devel-${NV_LIBNCCL_DEV_PACKAGE_VERSION} \
+#    && dnf clean all
+#
+#ENV LIBRARY_PATH="$CUDA_HOME/lib64/stubs"
+
+FROM cuda-base AS inference-base
+
 # Conda env
 ENV PATH=/opt/conda/bin:$PATH \
     CONDA_PREFIX=/opt/conda
@@ -278,7 +309,8 @@ RUN dnf install -y \
         openssl-devel \
         ca-certificates \
         make \
-        git
+        git; \
+    dnf clean all
 
 # Copy conda with PyTorch installed
 COPY --from=pytorch-install /opt/conda /opt/conda
@@ -333,7 +365,8 @@ ENV EXLLAMA_NO_FLASH_ATTN=1
 # Deps before the binaries
 # The binaries change on every build given we burn the SHA into them
 # The deps change less often.
-RUN dnf install -y g++
+RUN dnf install -y g++; \
+    dnf clean all
 
 # Install benchmarker
 COPY --from=builder /usr/src/target/release-opt/text-generation-benchmark /usr/local/bin/text-generation-benchmark
@@ -344,7 +377,7 @@ COPY --from=builder /usr/src/target/release-opt/text-generation-launcher /usr/lo
 
 
 # AWS Sagemaker compatible image
-FROM base AS sagemaker
+FROM inference-base AS sagemaker
 
 COPY sagemaker-entrypoint.sh entrypoint.sh
 RUN chmod +x entrypoint.sh
@@ -352,7 +385,7 @@ RUN chmod +x entrypoint.sh
 ENTRYPOINT ["./entrypoint.sh"]
 
 # Final image
-FROM base
+FROM inference-base
 
 COPY ./tgi-entrypoint.sh /tgi-entrypoint.sh
 RUN chmod +x /tgi-entrypoint.sh
